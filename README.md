@@ -110,4 +110,8 @@ Licensed under the Apache License 2.0. See [LICENSE](./LICENSE).
 
 ## Join the gregFramework Team!
 
+### macOS Support
+
+A native macOS version of Data Center already exists. At the moment, however, there is no implementation path available for macOS support in this mod, and I do not have access to an Apple device for development or testing. I am actively looking for contributors who can help make macOS support possible. See “Join the gregFramework Team” below.
+
 Contributions, testing, documentation, and feedback are welcome in the [greg Discord](https://discord.gg/greg).
