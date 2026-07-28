@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Local game/runtime logs and mod configuration
+Logs/
+UserData/
+*.log
