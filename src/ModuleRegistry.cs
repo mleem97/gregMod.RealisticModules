@@ -56,8 +56,11 @@ namespace GregModMoreModules
             return false;
         }
 
-        internal static bool IsKnownShopItem(int itemId) =>
-            EntriesByPrefab.ContainsKey(itemId) || PrefabByBulkItem.ContainsKey(itemId);
+        internal static bool IsKnownShopItem(int itemId)
+        {
+            if (PrefabByBulkItem.ContainsKey(itemId)) return true;
+            return EntriesByPrefab.TryGetValue(itemId, out var entry) && entry.Definition.IsShopItem;
+        }
 
         internal static int MaxKnownId
         {

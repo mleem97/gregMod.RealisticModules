@@ -34,7 +34,7 @@ namespace GregModMoreModules
             var arr = __instance.sfpPrefabs;
             int len = arr?.Length ?? 0;
 
-            if (len > 0 && !ModuleRegistry.Entries.ContainsKey(len - 1))
+            if (len > 0 && !Core.IsSetupCompleteFor(__instance))
             {
                 MelonLogger.Warning("sfpPrefabs was RESET — re-extending in Start.");
                 Core.SetupRegistry(__instance);
@@ -101,7 +101,7 @@ namespace GregModMoreModules
             var existingCartItem = FindExistingCartItem(shop, itemID, itemType);
             if (existingCartItem != null)
             {
-                existingCartItem.AddSpawnedItem(uid);
+                existingCartItem.AddOne();
                 shop.UpdateCartTotal();
                 MelonLogger.Msg($"Custom cart quantity increased: itemID={itemID}, uid={uid}, " +
                                 $"quantity={existingCartItem.Quantity}");
@@ -120,7 +120,7 @@ namespace GregModMoreModules
             }
 
             var noCustomColor = new Il2CppSystem.Nullable<Color>();
-            cartItem.Initialize(shop, displayName, itemID, price, itemType, uid, noCustomColor);
+            cartItem.Initialize(shop, displayName, itemID, price, itemType, noCustomColor);
             shop.cartUIItems.Add(cartItem);
             shop.UpdateCartTotal();
 
