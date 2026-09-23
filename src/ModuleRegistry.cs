@@ -13,15 +13,18 @@ namespace GregModMoreModules
             internal readonly int ModuleSfpType;
             internal readonly int BoxSfpType;
             internal readonly int BasePrefabID;
+            internal readonly int BaseBoxIndex;
             internal readonly int ModuleCount;
 
-            internal Entry(ModuleDefinition definition, int moduleSfpType, int basePrefabID, int moduleCount = 5)
+            internal Entry(ModuleDefinition definition, int moduleSfpType, int basePrefabID,
+                           int moduleCount = 5, int baseBoxIndex = -1)
             {
                 Definition = definition;
                 SpeedInternal = definition.InternalSpeed;
                 ModuleSfpType = moduleSfpType;
                 BoxSfpType = definition.PrefabId;
                 BasePrefabID = basePrefabID;
+                BaseBoxIndex = baseBoxIndex >= 0 ? baseBoxIndex : definition.BaseBoxIndex;
                 ModuleCount = moduleCount;
             }
         }
@@ -59,9 +62,17 @@ namespace GregModMoreModules
         internal static bool IsKnownShopItem(int itemId)
         {
             if (PrefabByBulkItem.ContainsKey(itemId)) return true;
-            return EntriesByPrefab.TryGetValue(itemId, out var entry) && entry.Definition.IsShopItem;
+            if (EntriesByPrefab.TryGetValue(itemId, out var entry) && entry.Definition.IsShopItem) return true;
+            if (Core.IsTrayItemID(itemId, out int moduleIndex, out _))
+            {
+                if (moduleIndex >= 0 && moduleIndex < ModuleCatalog.All.Length)
+                    return ModuleCatalog.All[moduleIndex].IsShopItem;
+            }
+            return false;
         }
 
+        // Highest registered prefab ID only — tray/bulk shop IDs are not
+        // sfpPrefabs slots and must not inflate the extended array.
         internal static int MaxKnownId
         {
             get

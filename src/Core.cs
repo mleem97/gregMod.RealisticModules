@@ -7,7 +7,7 @@ using Math = System.Math;
 using System.Collections;
 using System.Collections.Generic;
 
-[assembly: MelonInfo(typeof(GregModMoreModules.Core), "gregMod.RealisticModules", "1.0.0", "TeamGreg Modding (leoms1408 / mleem97)")]
+[assembly: MelonInfo(typeof(GregModMoreModules.Core), "gregMod.RealisticModules", "1.1.0", "TeamGreg Modding (leoms1408 / mleem97)")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace GregModMoreModules
@@ -18,20 +18,28 @@ namespace GregModMoreModules
         internal static Sprite BaseQsfpSprite;
 
         // sfpType of the vanilla QSFP+ module (form-factor; determines port compatibility).
-        // Our custom modules keep this value so they fit the same switch ports.
         internal static int BaseQsfpSfpType = -1;
 
-        // prefabID of the vanilla QSFP+ module — used as clone source in BuildModulePrefab/BuildBoxPrefab.
+        // prefabID of the vanilla QSFP+ module — used as clone source in BuildModulePrefab.
         internal static int BaseQsfpPrefabID = -1;
 
-        // New save IDs are explicit in ModuleDefinition. These constants only document
-        // the reserved ranges; no runtime identity is derived from array position.
+        // Index into mgm.sfpsBoxedPrefab of the vanilla QSFP+/Fibre 40G box —
+        // clone source for BuildBoxPrefab. Separate from BaseQsfpPrefabID because
+        // module prefabIDs and box array indices are different ID spaces.
+        internal static int BaseBoxPrefabIndex = -1;
+
+        // Explicit save IDs from ModuleCatalog (110+/210+). Tray packages use
+        // a separate range so bulk IDs stay stable for existing saves.
         internal const int MOD_ID_BASE  = ModuleCatalog.FirstNewPrefabId;
         internal const int BULK_ID_BASE = ModuleCatalog.FirstNewBulkId;
+        internal const int TRAY_ID_BASE = 310;
+
+        // Stückzahlen ("Trays") pro Modul — zusätzlich zur 5x-Box und dem 32x-Bulk.
+        internal const int TraySizeCount = 4;
+        internal static readonly int[] TraySizes = { 16, 32, 64, 128 };
 
         // Inactive holder for prefab templates — parenting templates here makes their
         // activeInHierarchy = false, so the game's UsableObject tracker ignores them.
-        // Object.Instantiate still produces active clones from inactive-hierarchy objects.
         internal static GameObject TemplateHolder { get; private set; }
         internal static CompatibilityMode CompatibilityMode { get; private set; } = CompatibilityMode.SimplifiedCompatibility;
         internal static bool IsSetupComplete { get; private set; }
@@ -48,15 +56,59 @@ namespace GregModMoreModules
         }
 
         // -----------------------------------------------------------------------
-        // Scans vanilla sfpPrefabs to find the highest-speed module (QSFP+ 40G),
-        // stores it as the clone source, then extends the sfpPrefabs array with
-        // one slot per custom module starting at MOD_ID_BASE.
+        // Diagnostic: dumps the full vanilla SFP module and SFP box prefab
+        // catalogs so each custom tier can be mapped to its real vanilla type.
+        // -----------------------------------------------------------------------
+        private static void DumpVanillaCatalog(MainGameManager mgm)
+        {
+            MelonLogger.Msg("=== Vanilla SFP module catalog ===");
+            var sfpPrefabs = mgm.sfpPrefabs;
+            if (sfpPrefabs != null)
+            {
+                for (int i = 0; i < sfpPrefabs.Length; i++)
+                {
+                    var go = sfpPrefabs[i];
+                    if (go == null) { MelonLogger.Msg($"[{i}] null"); continue; }
+                    var sfpMod = go.GetComponent<SFPModule>();
+                    var usable = go.GetComponent<UsableObject>();
+                    float speed = sfpMod != null ? sfpMod.speed : -1f;
+                    int   st    = sfpMod != null ? sfpMod.sfpType : -1;
+                    int   pid   = usable != null ? usable.prefabID : -1;
+                    string cell = speed >= 0f ? $"{speed * 5f:0}G" : "?";
+                    MelonLogger.Msg($"[{i}] prefabID={pid} sfpType={st} speed={cell} name={go.name}");
+                }
+            }
+            else
+            {
+                MelonLogger.Msg("(sfpPrefabs is null)");
+            }
+
+            MelonLogger.Msg("=== Vanilla SFPBox catalog ===");
+            var boxes = mgm.sfpsBoxedPrefab;
+            if (boxes != null)
+            {
+                for (int i = 0; i < boxes.Length; i++)
+                {
+                    var go = boxes[i];
+                    if (go == null) { MelonLogger.Msg($"[{i}] null"); continue; }
+                    var sfpBox = go.GetComponent<SFPBox>();
+                    int bt = sfpBox != null ? sfpBox.sfpBoxType : -1;
+                    MelonLogger.Msg($"[{i}] boxType={bt} name={go.name}");
+                }
+            }
+            else
+            {
+                MelonLogger.Msg("(sfpsBoxedPrefab is null)");
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // Scans vanilla sfpPrefabs for the real QSFP+ module (highest-speed
+        // vanilla-named entry) and the matching Fibre 40G box, stores them as
+        // clone sources, then extends sfpPrefabs with one slot per custom module.
         //
-        // Starting well above vanillaCount prevents prefabID collisions if
-        // the game later adds new vanilla SFP types at indices 4, 5, 6 …
-        //
-        // Called from PatchMainGameManagerAwake — the earliest point where
-        // sfpPrefabs is populated, guaranteed to run before OnLoad() restores saves.
+        // Base selection only considers vanilla-named entries (SFP_*). Without
+        // that filter a pre-extended array is picked as "highest speed".
         // -----------------------------------------------------------------------
         internal static void SetupRegistry(MainGameManager mgm)
         {
@@ -64,6 +116,7 @@ namespace GregModMoreModules
             ModuleRegistry.Clear();
             BaseQsfpPrefabID = -1;
             BaseQsfpSfpType = -1;
+            BaseBoxPrefabIndex = -1;
 
             if (!ModuleValidation.ValidateCatalog())
             {
@@ -78,26 +131,54 @@ namespace GregModMoreModules
                 return;
             }
 
-            int nativeCount = FindNativePrefabCount(sfpPrefabs);
-            MelonLogger.Msg($"SFP prefabs: array length={sfpPrefabs.Length}, native prefix={nativeCount}");
+            MelonLogger.Msg($"sfpPrefabs length: {sfpPrefabs.Length}");
 
-            float highestSpeed = -1f;
+            float highestVanillaSpeed = -1f;
+            int vanillaCount = 0;
 
-            for (int i = 0; i < nativeCount; i++)
+            for (int i = 0; i < sfpPrefabs.Length && i < MOD_ID_BASE; i++)
             {
-                var go        = sfpPrefabs[i];
+                var go = sfpPrefabs[i];
                 if (go == null) continue;
+
+                // Vanilla catalog only: SFP_RJ45 / SFP_fabric* / SFP_QSFP.
+                // Reject CustomSFP_*, SFPModule_custom_*, SFPModule_template_*.
+                if (!IsVanillaSfpName(go.name)) continue;
+
+                vanillaCount = i + 1;
+
                 var sfpMod    = go.GetComponent<SFPModule>();
                 var usableObj = go.GetComponent<UsableObject>();
                 float speed   = sfpMod    != null ? sfpMod.speed       : -1f;
                 int   sfpType = sfpMod    != null ? sfpMod.sfpType     : -1;
                 int   pid     = usableObj != null ? usableObj.prefabID : -1;
 
-                if (speed > highestSpeed)
+                if (speed > highestVanillaSpeed)
                 {
-                    highestSpeed     = speed;
-                    BaseQsfpSfpType  = sfpType;
-                    BaseQsfpPrefabID = pid;
+                    highestVanillaSpeed = speed;
+                    BaseQsfpSfpType     = sfpType;
+                    BaseQsfpPrefabID    = pid;
+                }
+            }
+
+            // Fallback when the name filter matched nothing (unusual layouts).
+            if (BaseQsfpPrefabID < 0)
+            {
+                int nativeCount = FindNativePrefabCount(sfpPrefabs);
+                for (int i = 0; i < nativeCount; i++)
+                {
+                    var go = sfpPrefabs[i];
+                    if (go == null) continue;
+                    var sfpMod = go.GetComponent<SFPModule>();
+                    var usableObj = go.GetComponent<UsableObject>();
+                    float speed = sfpMod != null ? sfpMod.speed : -1f;
+                    if (speed > highestVanillaSpeed)
+                    {
+                        highestVanillaSpeed = speed;
+                        BaseQsfpSfpType = sfpMod != null ? sfpMod.sfpType : -1;
+                        BaseQsfpPrefabID = usableObj != null ? usableObj.prefabID : -1;
+                    }
+                    vanillaCount = i + 1;
                 }
             }
 
@@ -108,7 +189,18 @@ namespace GregModMoreModules
             }
 
             MelonLogger.Msg($"Base QSFP+: prefabID={BaseQsfpPrefabID}, " +
-                            $"sfpType={BaseQsfpSfpType}, {highestSpeed * 5f} Gbps");
+                            $"sfpType={BaseQsfpSfpType}, {highestVanillaSpeed * 5f} Gbps, " +
+                            $"vanillaCount={vanillaCount}");
+
+            BaseBoxPrefabIndex = FindBaseBoxIndex(mgm);
+            MelonLogger.Msg($"Base box index: {BaseBoxPrefabIndex}" +
+                            (BaseBoxPrefabIndex >= 0 && mgm.sfpsBoxedPrefab != null &&
+                             BaseBoxPrefabIndex < mgm.sfpsBoxedPrefab.Length &&
+                             mgm.sfpsBoxedPrefab[BaseBoxPrefabIndex] != null
+                                ? $" ({mgm.sfpsBoxedPrefab[BaseBoxPrefabIndex].name})"
+                                : " (missing)"));
+
+            DumpVanillaCatalog(mgm);
 
             // Create/recreate the inactive holder that hides templates from the world system.
             if (TemplateHolder != null)
@@ -117,26 +209,22 @@ namespace GregModMoreModules
             TemplateHolder.SetActive(false);
             Object.DontDestroyOnLoad(TemplateHolder);
 
-            int vanillaCount = nativeCount;
-
             if (vanillaCount > MOD_ID_BASE)
             {
-                MelonLogger.Error($"vanilla sfpPrefabs.Length={vanillaCount} exceeds " +
+                MelonLogger.Error($"vanillaCount={vanillaCount} exceeds " +
                                   $"MOD_ID_BASE={MOD_ID_BASE}! prefabID collision risk — mod disabled.");
                 return;
             }
 
             foreach (var def in ModuleCatalog.Legacy)
             {
-                // IDs 100–106 were used by an older mod build, but are now
-                // occupied by native SFP prefabs in the current game. Never
-                // replace a native slot just to preserve an ambiguous alias.
                 if (IsPrefabSlotAvailable(sfpPrefabs, def.PrefabId))
                     ModuleRegistry.Register(def.PrefabId,
-                        new ModuleRegistry.Entry(def, BaseQsfpSfpType, BaseQsfpPrefabID));
+                        new ModuleRegistry.Entry(def, BaseQsfpSfpType, def.BasePrefabID, 5, def.BaseBoxIndex));
                 else
                     MelonLogger.Msg($"Legacy prefabID={def.PrefabId} retained by the game; alias skipped.");
             }
+
             // Older MoreModules builds used 1000–1006. Keep aliases loadable.
             for (int i = 0; i < ModuleCatalog.Legacy.Length; i++)
             {
@@ -150,13 +238,15 @@ namespace GregModMoreModules
                     Connector = legacy.Connector, ElectricalLaneCount = legacy.ElectricalLaneCount,
                     LaneSpeedGbps = legacy.LaneSpeedGbps, PriceMultiplier = 1, ShopGuid = legacy.ShopGuid,
                     ModuleColor = legacy.ModuleColor, Lifecycle = ModuleLifecycle.Legacy,
+                    BasePrefabID = legacy.BasePrefabID, BaseBoxIndex = legacy.BaseBoxIndex,
                 };
                 if (IsPrefabSlotAvailable(sfpPrefabs, alias.PrefabId))
                     ModuleRegistry.Register(alias.PrefabId,
-                        new ModuleRegistry.Entry(alias, BaseQsfpSfpType, BaseQsfpPrefabID));
+                        new ModuleRegistry.Entry(alias, BaseQsfpSfpType, alias.BasePrefabID, 5, alias.BaseBoxIndex));
                 else
                     MelonLogger.Msg($"Legacy alias prefabID={alias.PrefabId} already exists; alias skipped.");
             }
+
             foreach (var def in ModuleList.All)
             {
                 if (!IsPrefabSlotAvailable(sfpPrefabs, def.PrefabId))
@@ -166,12 +256,21 @@ namespace GregModMoreModules
                     continue;
                 }
 
+                int formSfpType = ResolveFormSfpType(mgm, def, vanillaCount);
+                if (formSfpType < 0)
+                {
+                    // Form base missing — still register with the global QSFP+ type.
+                    MelonLogger.Warning($"No vanilla base for '{def.DisplayName}' " +
+                                        $"(BasePrefabID={def.BasePrefabID}); using global QSFP+ sfpType.");
+                    formSfpType = BaseQsfpSfpType;
+                }
+
                 ModuleRegistry.Register(def.PrefabId,
-                    new ModuleRegistry.Entry(def, BaseQsfpSfpType, BaseQsfpPrefabID));
+                    new ModuleRegistry.Entry(def, formSfpType, def.BasePrefabID, 5, def.BaseBoxIndex));
+                MelonLogger.Msg($"Registered '{def.DisplayName}': prefabID={def.PrefabId}, " +
+                                $"{def.SpeedGbps} Gbps, sfpType={formSfpType}");
             }
 
-            // Preserve any slots another mod already added (for example
-            // MoreModules' 1000–1006 entries) while extending our own IDs.
             int maxPrefabId = Math.Max(ModuleRegistry.MaxKnownId, sfpPrefabs.Length - 1);
             var extended = new GameObject[maxPrefabId + 1];
             for (int i = 0; i < sfpPrefabs.Length; i++) extended[i] = sfpPrefabs[i];
@@ -184,11 +283,10 @@ namespace GregModMoreModules
                 if (template != null) template.name = $"SFPModule_template_{id}";
                 if (template != null)
                     extended[id] = template;
-                MelonLogger.Msg($"Registered '{entry.Definition.DisplayName}': prefabID={id}, {entry.Definition.SpeedGbps} Gbps");
             }
 
             mgm.sfpPrefabs = extended;
-            MelonLogger.Msg($"sfpPrefabs extended: {vanillaCount} → {extended.Length}");
+            MelonLogger.Msg($"sfpPrefabs extended: {sfpPrefabs.Length} → {extended.Length}");
             IsSetupComplete = ModuleRegistry.Entries.Count > 0;
         }
 
@@ -206,15 +304,67 @@ namespace GregModMoreModules
             return true;
         }
 
+        // sfpType of the vanilla prefab with the definition's BasePrefabID
+        // (form factor). -1 when the base is missing.
+        private static int ResolveFormSfpType(MainGameManager mgm, ModuleDefinition def, int vanillaCount)
+        {
+            var sfpPrefabs = mgm.sfpPrefabs;
+            if (sfpPrefabs == null) return -1;
+            for (int i = 0; i < sfpPrefabs.Length && i < vanillaCount; i++)
+            {
+                var go = sfpPrefabs[i];
+                if (go == null || !IsVanillaSfpName(go.name)) continue;
+                var sfpMod = go.GetComponent<SFPModule>();
+                var usableObj = go.GetComponent<UsableObject>();
+                if (usableObj != null && usableObj.prefabID == def.BasePrefabID && sfpMod != null)
+                    return sfpMod.sfpType;
+            }
+
+            return -1;
+        }
+
+        // Vanilla module shop/object names only (SFP_RJ45, SFP_fabric*, SFP_QSFP).
+        private static bool IsVanillaSfpName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            if (name.StartsWith("SFP_", System.StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        // Clone source for boxes: prefer highest vanilla boxType (Fibre 40G = 3),
+        // else last non-null entry. Never use BaseQsfpPrefabID (module ID space).
+        private static int FindBaseBoxIndex(MainGameManager mgm)
+        {
+            var boxes = mgm.sfpsBoxedPrefab;
+            if (boxes == null || boxes.Length == 0) return -1;
+
+            int best = -1;
+            int bestBoxType = -1;
+            int lastNonNull = -1;
+
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                var go = boxes[i];
+                if (go == null) continue;
+                lastNonNull = i;
+                var sfpBox = go.GetComponent<SFPBox>();
+                int bt = sfpBox != null ? sfpBox.sfpBoxType : -1;
+                if (bt > bestBoxType)
+                {
+                    bestBoxType = bt;
+                    best = i;
+                }
+            }
+
+            return best >= 0 ? best : lastNonNull;
+        }
+
         private static int FindNativePrefabCount(Il2CppReferenceArray<GameObject> prefabs)
         {
             int count = 0;
             while (count < prefabs.Length && prefabs[count] != null)
                 count++;
 
-            // Vanilla SFP arrays are dense. If a future build introduces a
-            // hole, use the native ID/index relationship instead of treating
-            // mod padding as vanilla content.
             if (count > 0) return count;
 
             int highestNativeId = -1;
@@ -236,23 +386,24 @@ namespace GregModMoreModules
         }
 
         // -----------------------------------------------------------------------
-        // Clones the vanilla QSFP+ module prefab and applies our custom speed and
-        // prefabID. Called on-demand from patches rather than caching the result,
-        // because Il2Cpp's GC can silently invalidate native pointers on cached
-        // GameObjects stored in C# data structures.
-        //
-        // parent: when non-null the clone is instantiated directly under that transform,
-        // so it is never active in hierarchy and the world tracker cannot pick it up.
-        // Pass TemplateHolder.transform for cached templates, null for live clones.
+        // Clones the vanilla form-factor module prefab and applies our custom
+        // speed and prefabID. parent: non-null → inactive template holder.
         // -----------------------------------------------------------------------
         internal static GameObject BuildModulePrefab(MainGameManager mgm, int prefabID,
                                                      ModuleRegistry.Entry entry,
                                                      Transform parent = null)
         {
-            var basePrefab = mgm.sfpPrefabs[entry.BasePrefabID];
+            int baseIndex = entry.BasePrefabID >= 0 ? entry.BasePrefabID : BaseQsfpPrefabID;
+            if (baseIndex < 0 || baseIndex >= mgm.sfpPrefabs.Length)
+            {
+                MelonLogger.Error($"Base prefab [{baseIndex}] out of range.");
+                return null;
+            }
+
+            var basePrefab = mgm.sfpPrefabs[baseIndex];
             if (basePrefab == null)
             {
-                MelonLogger.Error($"Base prefab [{entry.BasePrefabID}] is null.");
+                MelonLogger.Error($"Base prefab [{baseIndex}] is null.");
                 return null;
             }
 
@@ -268,17 +419,14 @@ namespace GregModMoreModules
             var usableObj = clone.GetComponent<UsableObject>();
             if (usableObj != null)
                 usableObj.prefabID = prefabID;
-            
+
             ApplyModuleTint(clone, prefabID);
 
             return clone;
         }
 
         // -----------------------------------------------------------------------
-        // Walks every Renderer in the module hierarchy, clones any material whose
-        // name contains "Blue", and recolors it to the tint defined per prefabID.
-        // Uses GetComponentsInChildren because the MeshRenderer of the QSFP+ model
-        // lives on a child GameObject, not on the root.
+        // Recolors materials named "Blue" to the catalog tint for this prefabID.
         // -----------------------------------------------------------------------
         internal static void ApplyModuleTint(GameObject root, int prefabID)
         {
@@ -287,14 +435,13 @@ namespace GregModMoreModules
             if (!ModuleRegistry.TryGet(prefabID, out var entry)) return;
             Color tint = entry.Definition.ModuleColor;
 
-            // Common color property names across shaders we might encounter.
             string[] colorProps = { "_Color", "_BaseColor", "_MainColor", "_TintColor", "_Tint", "_AlbedoColor" };
 
             var renderers = root.GetComponentsInChildren<Renderer>(true);
             foreach (var rend in renderers)
             {
                 if (rend == null) continue;
-                var mats = rend.materials; // returns instanced copies — safe to mutate
+                var mats = rend.materials;
                 bool changed = false;
 
                 for (int m = 0; m < mats.Length; m++)
@@ -315,9 +462,8 @@ namespace GregModMoreModules
         }
 
         // -----------------------------------------------------------------------
-        // Clones the vanilla QSFP+ box prefab and applies our custom sfpBoxType
-        // and prefabID. Also updates all child SFPModule components inside the box
-        // so the player receives the correct module when unboxing.
+        // Clones the vanilla box prefab matching the definition's form factor
+        // (BaseBoxIndex / global BaseBoxPrefabIndex) and applies custom types.
         // -----------------------------------------------------------------------
         internal static GameObject BuildBoxPrefab(MainGameManager mgm, int prefabID,
                                                   ModuleRegistry.Entry entry,
@@ -326,13 +472,14 @@ namespace GregModMoreModules
             var boxPrefabs = mgm.sfpsBoxedPrefab;
             if (boxPrefabs == null) return null;
 
-            GameObject baseBox = entry.BasePrefabID < boxPrefabs.Length
-                ? boxPrefabs[entry.BasePrefabID]
-                : null;
+            int wantBox = entry.BaseBoxIndex >= 0 ? entry.BaseBoxIndex : BaseBoxPrefabIndex;
+            GameObject baseBox = null;
+            if (wantBox >= 0 && wantBox < boxPrefabs.Length)
+                baseBox = boxPrefabs[wantBox];
 
-            // Fall back to the first non-null box if the expected index is missing.
+            // Fall back to the last non-null box (highest vanilla boxType).
             if (baseBox == null)
-                for (int i = 0; i < boxPrefabs.Length; i++)
+                for (int i = boxPrefabs.Length - 1; i >= 0; i--)
                     if (boxPrefabs[i] != null) { baseBox = boxPrefabs[i]; break; }
 
             if (baseBox == null)
@@ -354,10 +501,8 @@ namespace GregModMoreModules
             if (usableObj != null)
                 usableObj.prefabID = prefabID;
 
-            // The box prefab contains the SFPModules as child GameObjects.
-            // Only update speed — do NOT set prefabID on children, as that would
-            // register them as independent world items and cause them to spawn loose.
-            // PatchCableLinkInsertSFP corrects the prefabID at insertion time instead.
+            // Only update speed on children — do NOT set prefabID (world tracker
+            // would spawn loose modules). Identity is fixed at insertion time.
             foreach (var childModule in clone.GetComponentsInChildren<SFPModule>())
             {
                 childModule.speed = entry.SpeedInternal;
@@ -375,19 +520,20 @@ namespace GregModMoreModules
         // -----------------------------------------------------------------------
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
+            // Ein laufender Kasten-Scan wird beim Scene-Wechsel abgebrochen;
+            // das Flag zuruecksetzen, damit kuenftige Lieferungen wieder expandieren.
+            _boxScannerRunning = false;
+
             if (buildIndex != 0)
                 MelonCoroutines.Start(AddShopItems());
         }
 
         // -----------------------------------------------------------------------
         // Waits for the shop to finish initializing, then injects a shop button
-        // for each registered custom module into the "HL Mods" section.
-        // The 1.5 s delay is necessary because the shop UI is built after scene load.
+        // for each registered custom module: 5x box + trays 16/32/64/128.
         // -----------------------------------------------------------------------
         private IEnumerator AddShopItems()
         {
-            // The shop UI may build its item list lazily (tabs, progression).
-            // Retry until a usable template appears instead of giving up once.
             const int maxAttempts = 10;
             ShopItem sourceItem = null;
             ComputerShop computerShop = null;
@@ -412,26 +558,33 @@ namespace GregModMoreModules
 
             if (sourceItem == null || computerShop == null)
             {
-                LoggerInstance.Warning("No SFP box shop template found after retries — shop buttons skipped.");
+                LoggerInstance.Warning("No shop template found after retries — shop buttons skipped.");
                 yield break;
             }
 
             var shopRoot = computerShop.shopItemParent;
             if (shopRoot == null) { LoggerInstance.Warning("shopItemParent null."); yield break; }
 
-            // Target the "HL Mods" section inside VL-ShopItems so our items appear
-            // in the correct category rather than being appended at the end.
             var sfpParent = sourceItem.transform.parent != null
                 ? sourceItem.transform.parent.gameObject
                 : shopRoot;
+
+            // Ziel-Zeilenzahl: 1 x 5er-Paket + 4 Tray-Pakete (16/32/64/128) pro Modul.
+            int packagesPerModule = 1 + TraySizeCount;
+            var customRows = EnsureCustomSfpRows(shopRoot, sfpParent,
+                                                 ModuleList.All.Length * packagesPerModule);
+            if (customRows.Count < 0)
+                LoggerInstance.Warning("'HL Mods' not found — falling back to shopItemParent.");
 
             float itemHeight = 0f;
             var sourceRt = sourceItem.GetComponent<UnityEngine.RectTransform>();
             if (sourceRt != null)
                 itemHeight = sourceRt.rect.height;
 
-            int addedSfpCount  = 0;
-            int basePrice      = sourceItem.shopItemSO.price;
+            int addedSfpCount = 0;
+            int packageIndex  = 0;
+
+            var formTemplates = new Dictionary<int, ShopItem>();
 
             for (int i = 0; i < ModuleList.All.Length; i++)
             {
@@ -439,45 +592,59 @@ namespace GregModMoreModules
                 int prefabID = def.PrefabId;
                 if (!ModuleRegistry.TryGet(prefabID, out _)) continue;
 
-                // 5x-Paket (Standard)
-                string label5 = BuildShopLabel("5x", def);
-                int price5    = (int)(basePrice * def.PriceMultiplier);
-                // Add cards directly to the vanilla HL Mods grid. Creating
-                // artificial child rows made the parent layout count both the
-                // rows and their cards, which produced large empty sections
-                // when MoreSpools populated the same shop container.
-                var added5    = AddShopPackage(computerShop, sourceItem, sfpParent, prefabID,
-                                              label5, price5, def.XpToUnlock, def.ShopGuid);
-                if (added5 != null) addedSfpCount++;
+                var formTemplate = FormShopTemplate(computerShop, sourceItem, formTemplates, def.BaseBoxIndex);
+                int basePrice = formTemplate != null && formTemplate.shopItemSO != null
+                    ? formTemplate.shopItemSO.price
+                    : sourceItem.shopItemSO.price;
+                Sprite formSprite = ResolveFormSprite(formTemplate);
 
-                int bulkPrice = (int)(basePrice * def.PriceMultiplier * 5.5f);
-                string bulkGuid = def.ShopGuid + "_bulk32";
-                var added32 = AddShopPackage(computerShop, sourceItem, sfpParent, def.BulkItemId,
-                    BuildShopLabel("32x", def), bulkPrice, def.XpToUnlock, bulkGuid);
-                if (added32 != null) addedSfpCount++;
+                // 5x-Paket (Standard).
+                var added5 = AddShopPackage(computerShop, formTemplate ?? sourceItem,
+                                            RowForPackage(customRows, sfpParent, packageIndex),
+                                            prefabID,
+                                            BuildShopLabel("5x", def),
+                                            (int)(basePrice * def.PriceMultiplier),
+                                            def.XpToUnlock, def.ShopGuid, formSprite);
+                if (added5 != null) addedSfpCount++;
+                packageIndex++;
+
+                // Tray-Pakete 16 / 32 / 64 / 128 Stück — zusätzlich zur 5x-Box.
+                for (int s = 0; s < TraySizeCount; s++)
+                {
+                    int cap         = TraySizes[s];
+                    int trayItemID  = TRAY_ID_BASE + i * TraySizeCount + s;
+                    int trayPrice   = (int)(basePrice * def.PriceMultiplier * (cap / 5f));
+
+                    var addedTray = AddShopPackage(computerShop, formTemplate ?? sourceItem,
+                                                   RowForPackage(customRows, sfpParent, packageIndex),
+                                                   trayItemID,
+                                                   BuildShopLabel($"{cap}x", def),
+                                                   trayPrice,
+                                                   def.XpToUnlock,
+                                                   def.ShopGuid + $"_{cap}x", formSprite);
+                    if (addedTray != null) addedSfpCount++;
+                    packageIndex++;
+                }
             }
 
-            // The vanilla HL Mods container has a fixed content height. Because
-            // the cards are added directly to the existing grid (rather than to
-            // artificial child rows), explicitly grow the content by the number
-            // of new grid rows. Without this, later module cards are rendered
-            // outside the scrollable area and cannot be reached with the bar.
-            int addedRows = Mathf.CeilToInt(addedSfpCount / 4f);
-            ExtendVerticalContainer(shopRoot, itemHeight, addedRows);
+            EnsureBackplaneTopSpacer(computerShop, shopRoot, sfpParent, itemHeight);
+
+            ExtendVerticalContainer(shopRoot, itemHeight, customRows.Count);
 
             RebuildShopLayout(shopRoot);
         }
 
-        // Only real SFP boxes are valid templates — exact QSFP+ box first,
-        // then any SFP box. Searches the shopItems array AND the full shop
-        // hierarchy including inactive objects (locked/progression-gated
-        // boxes are inactive but still valid visual/price templates).
+        // Prefer the Fibre 40G / QSFP+ box (itemID == BaseBoxPrefabIndex), then
+        // highest itemID box, then any box. itemID for vanilla boxes tracks the
+        // box array index, not the module prefabID.
         private static ShopItem FindShopTemplate(ComputerShop computerShop)
         {
-            ShopItem qsfpBox = null;
+            ShopItem exactBox = null;
+            ShopItem bestIdBox = null;
             ShopItem anyBox = null;
             int arrayCount = 0;
             int hierarchyBoxes = 0;
+            bool yieldedAny = false;
 
             var items = computerShop.shopItems;
             if (items != null)
@@ -487,41 +654,34 @@ namespace GregModMoreModules
                     if (si == null || si.shopItemSO == null) continue;
                     arrayCount++;
                     if ((int)si.shopItemSO.itemType != 9) continue;
-                    if (si.shopItemSO.itemID == BaseQsfpPrefabID)
-                        qsfpBox = si;
-                    else if (anyBox == null)
-                        anyBox = si;
+                    yieldedAny = true;
+                    (exactBox, bestIdBox, anyBox) = PreferBox(si, exactBox, bestIdBox, anyBox);
                 }
             }
 
-            if (qsfpBox == null && anyBox == null)
+            if (!yieldedAny)
             {
                 var root = computerShop.shopItemParent;
-                if (root != null)
+                var all = root != null ? root.GetComponentsInChildren<ShopItem>(true) : null;
+                if (all != null)
                 {
-                    var all = root.GetComponentsInChildren<ShopItem>(true);
-                    if (all != null)
+                    foreach (var si in all)
                     {
-                        foreach (var si in all)
-                        {
-                            if (si == null || si.shopItemSO == null) continue;
-                            if ((int)si.shopItemSO.itemType != 9) continue;
-                            hierarchyBoxes++;
-                            if (si.shopItemSO.itemID == BaseQsfpPrefabID)
-                                qsfpBox = si;
-                            else if (anyBox == null)
-                                anyBox = si;
-                        }
+                        if (si == null || si.shopItemSO == null) continue;
+                        if ((int)si.shopItemSO.itemType != 9) continue;
+                        hierarchyBoxes++;
+                        (exactBox, bestIdBox, anyBox) = PreferBox(si, exactBox, bestIdBox, anyBox);
                     }
                 }
             }
 
-            ShopItem picked = qsfpBox ?? anyBox;
+            ShopItem picked = exactBox ?? bestIdBox ?? anyBox;
             if (picked != null)
             {
                 if (picked.shopItemSO.sprite != null)
                     BaseQsfpSprite = picked.shopItemSO.sprite;
-                string tier = picked == qsfpBox ? "exact QSFP+ box"
+                string tier = picked == exactBox
+                    ? $"exact box itemID={picked.shopItemSO.itemID}"
                     : $"SFP box (itemID={picked.shopItemSO.itemID})";
                 MelonLoader.MelonLogger.Msg($"Shop template: {tier}.");
             }
@@ -533,11 +693,24 @@ namespace GregModMoreModules
             return picked;
         }
 
-        private static System.Collections.Generic.List<GameObject> EnsureCustomSfpRows(GameObject shopRoot,
-                                                                                       GameObject templateRow,
-                                                                                       int itemCount)
+        private static (ShopItem exact, ShopItem bestId, ShopItem any) PreferBox(
+            ShopItem si, ShopItem exact, ShopItem bestId, ShopItem any)
         {
-            var rows = new System.Collections.Generic.List<GameObject>();
+            int id = si.shopItemSO != null ? si.shopItemSO.itemID : -1;
+            if (BaseBoxPrefabIndex >= 0 && id == BaseBoxPrefabIndex)
+                exact = si;
+            if (bestId == null || id > (bestId.shopItemSO != null ? bestId.shopItemSO.itemID : -1))
+                bestId = si;
+            if (any == null)
+                any = si;
+            return (exact, bestId, any);
+        }
+
+        private static List<GameObject> EnsureCustomSfpRows(GameObject shopRoot,
+                                                            GameObject templateRow,
+                                                            int itemCount)
+        {
+            var rows = new List<GameObject>();
             if (shopRoot == null || templateRow == null) return rows;
 
             int rowCount = Mathf.CeilToInt(itemCount / 4f);
@@ -576,6 +749,14 @@ namespace GregModMoreModules
             }
         }
 
+        private static GameObject RowForPackage(List<GameObject> customRows,
+                                                GameObject fallback, int packageIndex)
+        {
+            return customRows.Count > 0
+                ? customRows[Mathf.Min(packageIndex / 4, customRows.Count - 1)]
+                : fallback;
+        }
+
         private static string BuildShopLabel(string quantity, ModuleDefinition def)
         {
             string speed = $"{def.SpeedGbps:0}Gbps";
@@ -584,6 +765,45 @@ namespace GregModMoreModules
                 moduleName = moduleName.Substring(0, moduleName.Length - speed.Length).TrimEnd();
 
             return $"{quantity} {moduleName} {def.EthernetStandard} · {speed} · {def.Media} · {def.MaxReachMeters:0}m";
+        }
+
+        // Shop-Template je Box-Formfaktor (gecacht). Fallback: QSFP+-Template.
+        private static ShopItem FormShopTemplate(ComputerShop computerShop, ShopItem fallback,
+                                                 Dictionary<int, ShopItem> cache, int boxIndex)
+        {
+            int key = boxIndex >= 0 ? boxIndex : BaseBoxPrefabIndex;
+            if (cache.TryGetValue(key, out var cached)) return cached;
+            ShopItem found = null;
+            try
+            {
+                var items = computerShop.shopItems;
+                if (items != null && key >= 0)
+                {
+                    foreach (var si in items)
+                    {
+                        if (si == null || si.shopItemSO == null) continue;
+                        if ((int)si.shopItemSO.itemType != 9) continue;
+                        if (si.shopItemSO.itemID == key) { found = si; break; }
+                    }
+                }
+            }
+            catch { found = null; }
+
+            if (found == null) found = fallback;
+            cache[key] = found;
+            return found;
+        }
+
+        private static Sprite ResolveFormSprite(ShopItem formTemplate)
+        {
+            try
+            {
+                if (formTemplate != null && formTemplate.shopItemSO != null &&
+                    formTemplate.shopItemSO.sprite != null)
+                    return formTemplate.shopItemSO.sprite;
+            }
+            catch { }
+            return BaseQsfpSprite;
         }
 
         private static void ExtendVerticalContainer(GameObject parent, float itemHeight, int addedRows)
@@ -662,7 +882,7 @@ namespace GregModMoreModules
                 if (string.IsNullOrEmpty(name)) continue;
 
                 if (name.Contains("SystemX") &&
-                    (name.Contains("125K") || name.Contains("500K")))
+                    (name.Contains("100K") || name.Contains("125K") || name.Contains("500K")))
                     return true;
             }
 
@@ -676,7 +896,8 @@ namespace GregModMoreModules
                 var name = assembly.GetName().Name;
                 if (string.IsNullOrEmpty(name)) continue;
                 if (name.Contains("BackplaneBoostServers") ||
-                    name.Contains("DataCenterAutomatorServers"))
+                    name.Contains("DataCenterAutomatorServers") ||
+                    name.Contains("gregMod.Backplanes"))
                     return true;
             }
 
@@ -703,27 +924,28 @@ namespace GregModMoreModules
         // -----------------------------------------------------------------------
         // Clones an existing shop item GameObject, assigns a new ShopItemSO with
         // the custom module's name/price/ID, and adds it to the given parent.
-        // Returns the created GameObject, or null if the ShopItem component is missing.
         // -----------------------------------------------------------------------
         private static GameObject AddShopPackage(ComputerShop computerShop, ShopItem source,
                                                GameObject parent, int prefabID,
-                                               string label, int price, int xpToUnlock, string guid)
+                                               string label, int price, int xpToUnlock, string guid,
+                                               Sprite icon = null)
         {
             string objectName = $"ShopItem_{label.Replace(" ", "_").Replace("/", "_")}";
             if (parent.transform.Find(objectName) != null)
                 return null;
 
             bool alreadyRegistered = ShopItemAlreadyRegistered(computerShop, prefabID, guid);
+            Sprite useSprite = icon ?? BaseQsfpSprite;
 
             var newSO = ScriptableObject.CreateInstance<ShopItemSO>();
             newSO.itemName   = label;
             newSO.price      = price;
             newSO.xpToUnlock = xpToUnlock;
-            newSO.itemType   = source.shopItemSO.itemType; // SFPBox (9)
+            newSO.itemType   = PlayerManager.ObjectInHand.SFPBox; // always a box
             newSO.itemID     = prefabID;
             newSO.eol        = source.shopItemSO.eol;
             newSO.isCustomColor = source.shopItemSO.isCustomColor;
-            newSO.sprite     = BaseQsfpSprite;
+            newSO.sprite     = useSprite;
 
             var cloned = Object.Instantiate(source.gameObject, parent.transform, false);
             cloned.name = objectName;
@@ -751,15 +973,15 @@ namespace GregModMoreModules
                 shopItem.txtXpToUnlock.text = "";
             if (shopItem.unlockButton != null)
                 shopItem.unlockButton.SetActive(false);
-            if (shopItem.itemIcon != null && BaseQsfpSprite != null)
-                shopItem.itemIcon.sprite = BaseQsfpSprite;
+            if (shopItem.itemIcon != null && useSprite != null)
+                shopItem.itemIcon.sprite = useSprite;
 
             if (!alreadyRegistered)
                 RegisterShopItem(computerShop, shopItem);
             cloned.SetActive(true);
 
             MelonLogger.Msg($"Shop-Paket hinzugefügt: '{newSO.itemName}' " +
-                            $"(prefabID={prefabID}, price={newSO.price}, parent={parent.name})");
+                            $"(itemID={prefabID}, price={newSO.price}, parent={parent.name})");
             return cloned;
         }
 
@@ -792,10 +1014,8 @@ namespace GregModMoreModules
         }
 
         // -----------------------------------------------------------------------
-        // Builds a box prefab for the 32x shop item. Identical to a regular custom
-        // box but with "_bulk_" in the name. The actual slot expansion to 32 happens
-        // post-delivery via BulkUpgradeScanner — the game re-initializes sfpPositions
-        // after instantiation, so upgrading at prefab time has no effect.
+        // Builds a box prefab for the 32x bulk shop item. Marked "_bulk_" so the
+        // post-delivery scanner expands it to 32 slots.
         // -----------------------------------------------------------------------
         internal static GameObject BuildBulkBoxPrefab(MainGameManager mgm, int bulkItemID,
                                                       ModuleRegistry.Entry entry,
@@ -804,27 +1024,86 @@ namespace GregModMoreModules
             var box = BuildBoxPrefab(mgm, entry.Definition.PrefabId, entry, parent);
             if (box == null) return null;
 
-            // Mark with distinctive name so the scanner can identify it.
             box.name = $"SFPBox_bulk_{entry.Definition.PrefabId}";
             return box;
         }
 
         // -----------------------------------------------------------------------
-        // Coroutine that scans the world for boxes with "_bulk_" in their name
-        // that haven't been expanded to 32 slots yet. Started when a bulk item is
-        // purchased; runs until no more un-upgraded bulk boxes remain.
+        // Tray item IDs: TRAY_ID_BASE + moduleIndex * TraySizeCount + sizeIndex.
+        // moduleIndex is the index into ModuleCatalog.All (explicit PrefabIds).
         // -----------------------------------------------------------------------
-        private static bool _bulkScannerRunning;
-
-        internal static IEnumerator BulkUpgradeScanner()
+        internal static bool IsCustomItemID(int itemID)
         {
-            if (_bulkScannerRunning) yield break;
-            _bulkScannerRunning = true;
+            if (ModuleRegistry.TryGet(itemID, out var entry) && entry.Definition.IsShopItem) return true;
+            if (ModuleRegistry.TryGetByBulkItem(itemID, out _, out _)) return true;
+            if (IsCustomTrayItemID(itemID)) return true;
+            return false;
+        }
 
-            // Wait for the game to finish spawning and initializing the box.
-            yield return new WaitForSeconds(2f);
+        internal static bool IsCustomTrayItemID(int itemID)
+        {
+            return IsTrayItemID(itemID, out _, out _);
+        }
 
-            for (int scan = 0; scan < 40; scan++)
+        internal static bool IsTrayItemID(int itemID, out int moduleIndex, out int sizeIndex)
+        {
+            moduleIndex = -1;
+            sizeIndex   = -1;
+            int offset = itemID - TRAY_ID_BASE;
+            if (offset < 0) return false;
+            moduleIndex = offset / TraySizeCount;
+            sizeIndex   = offset % TraySizeCount;
+            return moduleIndex < ModuleCatalog.All.Length;
+        }
+
+        internal static int RegularIdForTray(int trayItemID)
+        {
+            return IsTrayItemID(trayItemID, out int moduleIndex, out _)
+                ? ModuleCatalog.All[moduleIndex].PrefabId
+                : -1;
+        }
+
+        internal static int TraySizeFromItemID(int trayItemID)
+        {
+            return IsTrayItemID(trayItemID, out _, out int sizeIndex)
+                ? TraySizes[sizeIndex]
+                : -1;
+        }
+
+        internal static GameObject BuildTrayBoxPrefab(MainGameManager mgm, int trayItemID,
+                                                      ModuleRegistry.Entry entry,
+                                                      Transform parent = null)
+        {
+            if (!IsTrayItemID(trayItemID, out int moduleIndex, out int sizeIndex)) return null;
+
+            int regularPrefabID = ModuleCatalog.All[moduleIndex].PrefabId;
+            int capacity        = TraySizes[sizeIndex];
+
+            var box = BuildBoxPrefab(mgm, regularPrefabID, entry, parent);
+            if (box == null) return null;
+
+            box.name = $"SFPBox_tray_{regularPrefabID}_{capacity}";
+            return box;
+        }
+
+        // -----------------------------------------------------------------------
+        // Coroutine that scans the world for size-coded module boxes (tray/bulk)
+        // that haven't been expanded yet. Polls for a time window because the
+        // delivery box arrives seconds after Buy / at checkout.
+        //   "_bulk_"                          → 32
+        //   "SFPBox_tray_<regularID>_<Kapa>"  → that capacity (16/32/64/128)
+        // -----------------------------------------------------------------------
+        private static bool _boxScannerRunning;
+
+        internal static IEnumerator ExpandAllSizedBoxes()
+        {
+            if (_boxScannerRunning) yield break;
+            _boxScannerRunning = true;
+
+            float deadline = Time.time + 90f;
+            int emptyPasses = 0;
+
+            while (Time.time < deadline)
             {
                 bool foundAny = false;
                 var allBoxes = Object.FindObjectsOfType<SFPBox>();
@@ -833,23 +1112,48 @@ namespace GregModMoreModules
                 {
                     if (box == null) continue;
                     if (!box.gameObject.activeInHierarchy) continue;
-                    if (!box.gameObject.name.Contains("(Clone")) continue;
-                    if (box.sfpPositions != null && box.sfpPositions.Length >= 32) continue;
-                    if (!box.gameObject.name.Contains("_bulk_")) continue;
 
-                    UpgradeToBulkBox(box, 32);
+                    int capacity = GetTargetCapacity(box.gameObject.name);
+                    if (capacity < 0) continue;
+                    if (box.sfpPositions != null && box.sfpPositions.Length >= capacity) continue;
+
+                    UpgradeToBulkBox(box, capacity);
                     foundAny = true;
                 }
 
-                if (!foundAny) break;
+                if (foundAny) emptyPasses = 0;
+                else emptyPasses++;
+
+                // Nach ~8 leeren Durchlaeufen (≈ 12 s ohne neuen Kasten) aufhören.
+                if (emptyPasses >= 8) break;
+
                 yield return new WaitForSeconds(1.5f);
             }
 
-            _bulkScannerRunning = false;
+            _boxScannerRunning = false;
+        }
+
+        internal static int GetTargetCapacity(string boxName)
+        {
+            if (string.IsNullOrEmpty(boxName)) return -1;
+
+            string name = boxName.Trim();
+            const string cloneSuffix = "(Clone)";
+            if (name.EndsWith(cloneSuffix, System.StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - cloneSuffix.Length);
+
+            if (name.IndexOf("_bulk_", System.StringComparison.Ordinal) >= 0) return 32;
+
+            int idx = name.IndexOf("_tray_", System.StringComparison.Ordinal);
+            if (idx < 0) return -1;
+            string tail = name.Substring(idx + "_tray_".Length);
+            int under = tail.LastIndexOf('_');
+            if (under < 0) return -1;
+            return int.TryParse(tail.Substring(under + 1), out int cap) && cap > 0 ? cap : -1;
         }
 
         // -----------------------------------------------------------------------
-        // Expands a live SFPBox from its vanilla capacity (5) to newCapacity (32)
+        // Expands a live SFPBox from its vanilla capacity (5) to newCapacity
         // by cloning slot positions and using proper Il2Cpp array types.
         // -----------------------------------------------------------------------
         internal static void UpgradeToBulkBox(SFPBox box, int newCapacity)
@@ -866,7 +1170,6 @@ namespace GregModMoreModules
             int fullSlotValue = box.usedPositions != null && box.usedPositions.Length > 0
                 ? box.usedPositions[oldCap - 1] : 1;
 
-            // Copy existing slots.
             for (int i = 0; i < oldCap; i++)
             {
                 newPositions[i] = oldPositions[i];
@@ -874,7 +1177,6 @@ namespace GregModMoreModules
                     ? box.usedPositions[i] : 0;
             }
 
-            // Clone new slots from the original positions (round-robin).
             for (int i = oldCap; i < newCapacity; i++)
             {
                 int baseIdx = i % oldCap;
@@ -893,6 +1195,5 @@ namespace GregModMoreModules
 
             MelonLogger.Msg($"Upgraded box '{box.gameObject.name}' from {oldCap} → {newCapacity} slots.");
         }
-
     }
 }

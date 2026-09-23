@@ -79,6 +79,22 @@ namespace GregModMoreModules
         public ModuleLifecycle Lifecycle;
         public string SourceNote;
 
+        /// <summary>
+        /// Vanilla module prefabID to clone (form factor): 0 = RJ45, 1 = SFP+,
+        /// 2 = SFP28, 3 = QSFP+. Determines sfpType (port compatibility) and model.
+        /// </summary>
+        public int BasePrefabID = 3;
+
+        /// <summary>Index into mgm.sfpsBoxedPrefab for the matching vanilla box (-1 = global base).</summary>
+        public int BaseBoxIndex = -1;
+
+        /// <summary>Connection word for the shop label ("Fiber", "Copper").</summary>
+        public string ConnectionLabel =>
+            Connector == ConnectorType.Copper || Media == ModuleMedia.PassiveDac ||
+            Media == ModuleMedia.ActiveCopper
+                ? "Copper"
+                : "Fiber";
+
         internal float InternalSpeed => SpeedGbps / 5f;
         internal bool IsShopItem => Lifecycle != ModuleLifecycle.Legacy;
 
@@ -175,6 +191,13 @@ namespace GregModMoreModules
             return null;
         }
 
+        internal static int IndexOfShopModule(int prefabId)
+        {
+            for (int i = 0; i < All.Length; i++)
+                if (All[i].PrefabId == prefabId) return i;
+            return -1;
+        }
+
         private static ModuleDefinition New(int prefabId, int bulkItemId, string stableId, string displayName,
             ModuleFormFactor formFactor, ModuleMedia media, string standard, float speed, float reach,
             float watts, ConnectorType connector, int lanes, float laneSpeed, float price, int xp,
@@ -186,6 +209,8 @@ namespace GregModMoreModules
             LaneSpeedGbps = laneSpeed, PriceMultiplier = multiplier, XpToUnlock = xp,
             ShopGuid = "realistic_modules_" + stableId, ModuleColor = color, Lifecycle = lifecycle,
             SourceNote = string.IsNullOrWhiteSpace(source) ? standard + " product-class baseline." : source,
+            BasePrefabID = VanillaBasePrefabFor(formFactor),
+            BaseBoxIndex = VanillaBaseBoxFor(formFactor),
             BreakoutOptions = lanes > 1 ? new[] { new BreakoutProfile { DisplayName = $"{lanes}x {laneSpeed:0}G", LaneCount = lanes, LaneSpeedGbps = laneSpeed } } : Array.Empty<BreakoutProfile>(),
         };
 
@@ -197,7 +222,32 @@ namespace GregModMoreModules
             Connector = ConnectorType.Mpo, ElectricalLaneCount = 4, LaneSpeedGbps = speed / 4,
             PriceMultiplier = 1, XpToUnlock = 0, ShopGuid = "realistic_modules_" + stableId,
             ModuleColor = color, Lifecycle = ModuleLifecycle.Legacy, SourceNote = "Reserved for save migration.",
+            BasePrefabID = 3, BaseBoxIndex = -1,
         };
+
+        // Vanilla prefabID space: 0=RJ45, 1=SFP+, 2=SFP28, 3=QSFP+.
+        private static int VanillaBasePrefabFor(ModuleFormFactor formFactor)
+        {
+            switch (formFactor)
+            {
+                case ModuleFormFactor.SfpPlus: return 1;
+                case ModuleFormFactor.Sfp28: return 2;
+                case ModuleFormFactor.Sfp56: return 2;
+                default: return 3;
+            }
+        }
+
+        // Vanilla box array index (0=RJ45 … 3=Fibre 40G/QSFP+). -1 = global BaseBoxPrefabIndex.
+        private static int VanillaBaseBoxFor(ModuleFormFactor formFactor)
+        {
+            switch (formFactor)
+            {
+                case ModuleFormFactor.SfpPlus: return 1;
+                case ModuleFormFactor.Sfp28: return 2;
+                case ModuleFormFactor.Sfp56: return 2;
+                default: return -1;
+            }
+        }
     }
 
     internal static class ModuleList
