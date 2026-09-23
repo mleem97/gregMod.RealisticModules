@@ -13,7 +13,11 @@
 
 ## Overview
 
-**gregMod.RealisticModules** — gregMod.RealisticModules
+**gregMod.RealisticModules** — realistic transceiver modules for the Data Center shop
+(100G–1.6T product classes with media, reach, and lane metadata). Ships the same package
+system as `gregMod.MoreModules` v1.0.18: **5 / 16 / 32 / 64 / 128**-piece boxes, form-factor
+shop templates, and a post-checkout box-expansion scanner. When both mods are installed,
+`gregMod.MoreModules` yields so the catalog appears exactly once.
 
 Siehe [docs/INDEX.md](docs/INDEX.md) für die komplette Dokumentation.
 
@@ -26,6 +30,11 @@ Siehe [docs/INDEX.md](docs/INDEX.md) für die komplette Dokumentation.
 
 ## Features
 
+- Realistic 100G / 200G / 400G / 800G / 1.6T transceiver catalog (DAC, AOC, SR/FR/LR, DR)
+- Shop packages: **5x box** + **trays 16 / 32 / 64 / 128** (legacy 32x bulk IDs still load)
+- Form-factor shop templates (vanilla box array), stable explicit save IDs 110+/210+
+- Identity-safe inserts (same-speed variants persist correctly); optional strict port compatibility
+- Coexists with `gregMod.MoreModules` (that mod disables itself; this catalog wins)
 - Siehe [docs/INDEX.md](docs/INDEX.md) und [QUICKSTART.md](QUICKSTART.md)
 
 ## Installation
