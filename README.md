@@ -6,6 +6,7 @@
 
 ## Links
 
+- **Steam Workshop:** [My Workshop (Data Center)](https://steamcommunity.com/id/frikadelle3000/myworkshopfiles/?appid=4170200)
 - **Repository:** [https://github.com/mleem97/gregMod.RealisticModules](https://github.com/mleem97/gregMod.RealisticModules)
 - **Issues:** [https://github.com/mleem97/gregMod.RealisticModules/issues](https://github.com/mleem97/gregMod.RealisticModules/issues)
 - **Releases:** [https://github.com/mleem97/gregMod.RealisticModules/releases](https://github.com/mleem97/gregMod.RealisticModules/releases)
