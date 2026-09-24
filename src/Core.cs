@@ -682,7 +682,7 @@ namespace GregModMoreModules
                 if (added5 != null) addedSfpCount++;
                 packageIndex++;
 
-                // Tray packs 16 / 32 / 64 / 128 pcs — in addition to the 5x box.
+                // Tray packs 16 / 32 / 64 / 128 pieces — in addition to the 5x box.
                 for (int s = 0; s < TraySizeCount; s++)
                 {
                     int cap         = TraySizes[s];
