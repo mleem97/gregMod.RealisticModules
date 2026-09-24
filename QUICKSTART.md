@@ -2,7 +2,7 @@
 
 > gregMod.RealisticModules
 
-Repo: [https://github.com/mleem97/gregMod.RealisticModules](https://github.com/mleem97/gregMod.RealisticModules) · Version: `1.1.0` · Lizenz: Apache-2.0.
+Repo: [https://github.com/mleem97/gregMod.RealisticModules](https://github.com/mleem97/gregMod.RealisticModules) · Version: `1.3.0` · Lizenz: Apache-2.0.
 
 ## 1. Klonen
 

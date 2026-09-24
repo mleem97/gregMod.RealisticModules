@@ -34,6 +34,9 @@ namespace GregModMoreModules
             var arr = __instance.sfpPrefabs;
             int len = arr?.Length ?? 0;
 
+            if (!Core.IsEnabled)
+                return;
+
             if (len > 0 && !Core.IsSetupCompleteFor(__instance))
             {
                 MelonLogger.Warning("sfpPrefabs was RESET — re-extending in Start.");
@@ -59,7 +62,7 @@ namespace GregModMoreModules
                                    PlayerManager.ObjectInHand itemType, string displayName,
                                    bool isCustomColor)
         {
-            if (ModuleRegistry.IsKnownShopItem(itemID))
+            if (Core.IsEnabled && ModuleRegistry.IsKnownShopItem(itemID))
             {
                 int before = __instance.cartUIItems != null ? __instance.cartUIItems.Count : -1;
                 MelonLogger.Msg($"Buy clicked: itemID={itemID}, type={(int)itemType}, " +
@@ -143,6 +146,8 @@ namespace GregModMoreModules
     {
         private static void Prefix(ComputerShop __instance)
         {
+            if (!Core.IsEnabled)
+                return;
             MelonCoroutines.Start(Core.ExpandAllSizedBoxes());
         }
     }
@@ -157,6 +162,9 @@ namespace GregModMoreModules
     {
         private static bool Prefix(int itemID, PlayerManager.ObjectInHand itemType, ref GameObject __result)
         {
+            if (!Core.IsEnabled)
+                return true;
+
             var mgm = MainGameManager.instance;
             if (mgm == null) return true;
 
@@ -227,6 +235,9 @@ namespace GregModMoreModules
     {
         private static void Prefix()
         {
+            if (!Core.IsEnabled)
+                return;
+
             var mgm = MainGameManager.instance;
             if (mgm == null) return;
 
@@ -264,7 +275,7 @@ namespace GregModMoreModules
     {
         private static void Postfix(SFPBox __instance, SFPModule __result)
         {
-            if (__instance == null || __result == null) return;
+            if (!Core.IsEnabled || __instance == null || __result == null) return;
             int boxType = -1;
             try { boxType = __instance.sfpBoxType; } catch { return; }
             if (!ModuleRegistry.TryGet(boxType, out _)) return;
@@ -283,6 +294,8 @@ namespace GregModMoreModules
     {
         private static void Prefix(float speed, SFPModule module)
         {
+            if (!Core.IsEnabled) return;
+
             var usableObj = module?.GetComponent<UsableObject>();
             if (usableObj == null) return;
 
@@ -337,6 +350,9 @@ namespace GregModMoreModules
     {
         private static bool Prefix(SFPBox __instance, int sfpType, ref bool __result)
         {
+            if (!Core.IsEnabled)
+                return true;
+
             int boxType = __instance.sfpBoxType;
             if (!ModuleRegistry.TryGet(boxType, out var entry)) return true;
 

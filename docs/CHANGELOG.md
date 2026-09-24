@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.3.0
+
+- **Mass Insert** (F1 panel + F8 settings tab):
+  - **Fill empty ports** — spawns catalog modules into every empty SFP cage
+    whose `sfpTypeSupported` matches a module form factor (round-robin per type).
+  - **Fill + replace matching** — also swaps occupied cages when the connector
+    type still matches and no cable is attached (`RemoveSFP` → `InsertSFP`).
+  - Always uses vanilla `CableLink.InsertSFP` so identity rewrite, gregCore
+    hooks, and Backplanes reassert run; one insert per frame; safety cap 400.
+
+## v1.2.0
+
+- **F1 / gregCore integration:** RealisticModules appears in the F1 mod hub
+  with an openable config panel (Mod active + Strict port compatibility).
+  Optional F8 settings tab with the same toggles.
+- **Master switch `Enabled`** (MelonPreferences category `gregMod.RealisticModules`):
+  when off, catalog setup, shop injection, and Harmony behavior stay vanilla.
+  Soft re-enable reuses existing templates when possible; full effect after
+  scene load / restart.
+- gregCore is optional at runtime (`GregHost` type probe + separate
+  registration method so the mod still loads without gregCore).
+
 ## v1.1.0
 
 - Feature parity with `gregMod.MoreModules` v1.0.18 (realistic catalog kept):

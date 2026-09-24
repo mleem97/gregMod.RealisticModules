@@ -7,7 +7,7 @@ using Math = System.Math;
 using System.Collections;
 using System.Collections.Generic;
 
-[assembly: MelonInfo(typeof(GregModMoreModules.Core), "gregMod.RealisticModules", "1.1.0", "TeamGreg Modding (leoms1408 / mleem97)")]
+[assembly: MelonInfo(typeof(GregModMoreModules.Core), "gregMod.RealisticModules", "1.3.0", "TeamGreg Modding (leoms1408 / mleem97)")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace GregModMoreModules
@@ -42,17 +42,57 @@ namespace GregModMoreModules
         // activeInHierarchy = false, so the game's UsableObject tracker ignores them.
         internal static GameObject TemplateHolder { get; private set; }
         internal static CompatibilityMode CompatibilityMode { get; private set; } = CompatibilityMode.SimplifiedCompatibility;
+        internal static bool OfferExperimentalModules { get; private set; }
         internal static bool IsSetupComplete { get; private set; }
         private static readonly Dictionary<int, int> ExtendedShopRowsByParent = new Dictionary<int, int>();
 
-        [System.Obsolete]
-        public override void OnApplicationStart()
+        public override void OnInitializeMelon()
         {
-            var category = MelonPreferences.CreateCategory("gregMod.RealisticModules");
-            var strict = category.CreateEntry("StrictCompatibility", false,
-                "Strict compatibility", "Require the observed host sfpType to match the module.");
-            CompatibilityMode = strict.Value ? CompatibilityMode.StrictCompatibility : CompatibilityMode.SimplifiedCompatibility;
+            ModConfig.Load();
+            RefreshCompatibilityMode();
+            OfferExperimentalModules = ModConfig.OfferExperimentalModules;
             MelonLogger.Msg($"Compatibility mode: {CompatibilityMode}");
+            MelonLogger.Msg($"Experimental modules: {(OfferExperimentalModules ? "offered" : "hidden")}");
+            MelonLogger.Msg($"Mod active: {(ModConfig.Enabled ? "yes" : "no")}");
+
+            if (GregHost.HasCore)
+                RegisterCoreExtras();
+            else
+                MelonLogger.Msg("[RealisticModules] gregCore not present — F1 menu skipped.");
+        }
+
+        // Separate method: JIT will not load gregCore types unless called.
+        private static void RegisterCoreExtras()
+        {
+            GregCoreIntegration.Register();
+        }
+
+        internal static bool IsEnabled => ModConfig.Enabled;
+
+        internal static void RefreshCompatibilityMode()
+        {
+            CompatibilityMode = ModConfig.StrictCompatibility
+                ? CompatibilityMode.StrictCompatibility
+                : CompatibilityMode.SimplifiedCompatibility;
+        }
+
+        // Soft disable while the game is already running: registry/shop inject
+        // stop immediately. Extended sfpPrefabs stay until the next Awake.
+        internal static void DisableAtRuntime()
+        {
+            IsSetupComplete = false;
+            ModuleRegistry.Clear();
+        }
+
+        // True when the slot already holds a template we created earlier
+        // (re-enable without a full rebuild).
+        internal static bool IsOwnTemplate(GameObject go, int prefabId)
+        {
+            if (go == null) return false;
+            string n = go.name;
+            if (string.IsNullOrEmpty(n)) return false;
+            return n == $"SFPModule_template_{prefabId}" ||
+                   n == $"SFPModule_custom_{prefabId}";
         }
 
         // -----------------------------------------------------------------------
@@ -117,6 +157,12 @@ namespace GregModMoreModules
             BaseQsfpPrefabID = -1;
             BaseQsfpSfpType = -1;
             BaseBoxPrefabIndex = -1;
+
+            if (!ModConfig.Enabled)
+            {
+                MelonLogger.Msg("RealisticModules disabled via config — skipping setup.");
+                return;
+            }
 
             if (!ModuleValidation.ValidateCatalog())
             {
@@ -249,8 +295,24 @@ namespace GregModMoreModules
 
             foreach (var def in ModuleList.All)
             {
+                if (def.Lifecycle == ModuleLifecycle.Experimental && !OfferExperimentalModules)
+                    continue;
+
                 if (!IsPrefabSlotAvailable(sfpPrefabs, def.PrefabId))
                 {
+                    var existing = def.PrefabId >= 0 && def.PrefabId < sfpPrefabs.Length
+                        ? sfpPrefabs[def.PrefabId]
+                        : null;
+                    if (IsOwnTemplate(existing, def.PrefabId))
+                    {
+                        int formSfpType0 = ResolveFormSfpType(mgm, def, vanillaCount);
+                        if (formSfpType0 < 0) formSfpType0 = BaseQsfpSfpType;
+                        ModuleRegistry.Register(def.PrefabId,
+                            new ModuleRegistry.Entry(def, formSfpType0, def.BasePrefabID, 5, def.BaseBoxIndex));
+                        MelonLogger.Msg($"Re-registered '{def.DisplayName}' from existing template.");
+                        continue;
+                    }
+
                     MelonLogger.Error($"PrefabID {def.PrefabId} is already occupied; " +
                                        $"skipping '{def.DisplayName}'.");
                     continue;
@@ -279,6 +341,8 @@ namespace GregModMoreModules
             {
                 int id = pair.Key;
                 var entry = pair.Value;
+                if (id < extended.Length && IsOwnTemplate(extended[id], id))
+                    continue;
                 var template = BuildModulePrefab(mgm, id, entry, TemplateHolder.transform);
                 if (template != null) template.name = $"SFPModule_template_{id}";
                 if (template != null)
@@ -524,6 +588,13 @@ namespace GregModMoreModules
             // das Flag zuruecksetzen, damit kuenftige Lieferungen wieder expandieren.
             _boxScannerRunning = false;
 
+            if (!ModConfig.Enabled)
+            {
+                IsSetupComplete = false;
+                ModuleRegistry.Clear();
+                return;
+            }
+
             if (buildIndex != 0)
                 MelonCoroutines.Start(AddShopItems());
         }
@@ -534,6 +605,9 @@ namespace GregModMoreModules
         // -----------------------------------------------------------------------
         private IEnumerator AddShopItems()
         {
+            if (!ModConfig.Enabled || !IsSetupComplete)
+                yield break;
+
             const int maxAttempts = 10;
             ShopItem sourceItem = null;
             ComputerShop computerShop = null;

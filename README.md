@@ -15,9 +15,9 @@
 
 **gregMod.RealisticModules** — realistic transceiver modules for the Data Center shop
 (100G–1.6T product classes with media, reach, and lane metadata). Ships the same package
-system as `gregMod.MoreModules` v1.0.18: **5 / 16 / 32 / 64 / 128**-piece boxes, form-factor
+system as `gregMod.MoreModules`: **5 / 16 / 32 / 64 / 128**-piece boxes, form-factor
 shop templates, and a post-checkout box-expansion scanner. When both mods are installed,
-`gregMod.MoreModules` yields so the catalog appears exactly once.
+`gregMod.MoreModules` yields while RealisticModules is **Enabled** (F1 toggle).
 
 Siehe [docs/INDEX.md](docs/INDEX.md) für die komplette Dokumentation.
 
@@ -34,7 +34,10 @@ Siehe [docs/INDEX.md](docs/INDEX.md) für die komplette Dokumentation.
 - Shop packages: **5x box** + **trays 16 / 32 / 64 / 128** (legacy 32x bulk IDs still load)
 - Form-factor shop templates (vanilla box array), stable explicit save IDs 110+/210+
 - Identity-safe inserts (same-speed variants persist correctly); optional strict port compatibility
-- Coexists with `gregMod.MoreModules` (that mod disables itself; this catalog wins)
+- Coexists with `gregMod.MoreModules` (that mod disables itself while this one is enabled)
+- **F1 gregCore hub:** open config panel — Master switch **Mod active** + **Strict port compatibility**
+- **Mass Insert:** fill all empty matching SFP cages (optional replace when connector still matches, no cable)
+- Optional F8 settings tab with the same toggles (MelonPreferences `gregMod.RealisticModules`)
 - Siehe [docs/INDEX.md](docs/INDEX.md) und [QUICKSTART.md](QUICKSTART.md)
 
 ## Installation

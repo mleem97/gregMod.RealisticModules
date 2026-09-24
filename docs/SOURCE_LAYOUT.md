@@ -5,6 +5,10 @@ All C# source files live under `src/`. Game and MelonLoader assemblies are kept 
 ```text
 src/
 ├── Core.cs
+├── GregCoreIntegration.cs
+├── GregHost.cs
+├── MassInsert.cs
+├── ModConfig.cs
 ├── ModuleDefinition.cs
 ├── ModuleRegistry.cs
 ├── ModuleValidation.cs
