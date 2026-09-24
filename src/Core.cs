@@ -1054,7 +1054,7 @@ namespace GregModMoreModules
                 RegisterShopItem(computerShop, shopItem);
             cloned.SetActive(true);
 
-            MelonLogger.Msg($"Shop-Paket hinzugefügt: '{newSO.itemName}' " +
+            MelonLogger.Msg($"Shop package added: '{newSO.itemName}' " +
                             $"(itemID={prefabID}, price={newSO.price}, parent={parent.name})");
             return cloned;
         }
