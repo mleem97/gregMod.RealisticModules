@@ -5,8 +5,8 @@ using UnityEngine.UIElements;
 
 namespace GregModMoreModules
 {
-    // gregCore F1-Hub + Settings-Hub. Nur aufrufen, wenn GregHost.HasCore
-    // (eigene Methoden wegen JIT-Trennung ohne gregCore-DLL).
+    // gregCore F1 hub + settings hub. Only call when GregHost.HasCore
+    // (separate methods for JIT isolation without the gregCore DLL).
     internal static class GregCoreIntegration
     {
         private const string MenuId = "realisticmodules";

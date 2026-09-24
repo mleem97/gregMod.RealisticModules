@@ -34,7 +34,7 @@ namespace GregModMoreModules
         internal const int BULK_ID_BASE = ModuleCatalog.FirstNewBulkId;
         internal const int TRAY_ID_BASE = 310;
 
-        // Stückzahlen ("Trays") pro Modul — zusätzlich zur 5x-Box und dem 32x-Bulk.
+        // Piece counts ("trays") per module — in addition to the 5x box and the 32x bulk.
         internal const int TraySizeCount = 4;
         internal static readonly int[] TraySizes = { 16, 32, 64, 128 };
 
@@ -584,8 +584,8 @@ namespace GregModMoreModules
         // -----------------------------------------------------------------------
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
-            // Ein laufender Kasten-Scan wird beim Scene-Wechsel abgebrochen;
-            // das Flag zuruecksetzen, damit kuenftige Lieferungen wieder expandieren.
+            // A running box scan is cancelled on scene change;
+            // reset the flag so future deliveries expand again.
             _boxScannerRunning = false;
 
             if (!ModConfig.Enabled)
@@ -643,7 +643,7 @@ namespace GregModMoreModules
                 ? sourceItem.transform.parent.gameObject
                 : shopRoot;
 
-            // Ziel-Zeilenzahl: 1 x 5er-Paket + 4 Tray-Pakete (16/32/64/128) pro Modul.
+            // Target row count: 1 x 5-pack + 4 tray packs (16/32/64/128) per module.
             int packagesPerModule = 1 + TraySizeCount;
             var customRows = EnsureCustomSfpRows(shopRoot, sfpParent,
                                                  ModuleList.All.Length * packagesPerModule);
@@ -672,7 +672,7 @@ namespace GregModMoreModules
                     : sourceItem.shopItemSO.price;
                 Sprite formSprite = ResolveFormSprite(formTemplate);
 
-                // 5x-Paket (Standard).
+                // 5x pack (standard).
                 var added5 = AddShopPackage(computerShop, formTemplate ?? sourceItem,
                                             RowForPackage(customRows, sfpParent, packageIndex),
                                             prefabID,
@@ -682,7 +682,7 @@ namespace GregModMoreModules
                 if (added5 != null) addedSfpCount++;
                 packageIndex++;
 
-                // Tray-Pakete 16 / 32 / 64 / 128 Stück — zusätzlich zur 5x-Box.
+                // Tray packs 16 / 32 / 64 / 128 pcs — in addition to the 5x box.
                 for (int s = 0; s < TraySizeCount; s++)
                 {
                     int cap         = TraySizes[s];
@@ -841,7 +841,7 @@ namespace GregModMoreModules
             return $"{quantity} {moduleName} {def.EthernetStandard} · {speed} · {def.Media} · {def.MaxReachMeters:0}m";
         }
 
-        // Shop-Template je Box-Formfaktor (gecacht). Fallback: QSFP+-Template.
+        // Shop template per box form factor (cached). Fallback: QSFP+ template.
         private static ShopItem FormShopTemplate(ComputerShop computerShop, ShopItem fallback,
                                                  Dictionary<int, ShopItem> cache, int boxIndex)
         {
@@ -1165,7 +1165,7 @@ namespace GregModMoreModules
         // that haven't been expanded yet. Polls for a time window because the
         // delivery box arrives seconds after Buy / at checkout.
         //   "_bulk_"                          → 32
-        //   "SFPBox_tray_<regularID>_<Kapa>"  → that capacity (16/32/64/128)
+        //   "SFPBox_tray_<regularID>_<Capacity>"  → that capacity (16/32/64/128)
         // -----------------------------------------------------------------------
         private static bool _boxScannerRunning;
 
@@ -1198,7 +1198,7 @@ namespace GregModMoreModules
                 if (foundAny) emptyPasses = 0;
                 else emptyPasses++;
 
-                // Nach ~8 leeren Durchlaeufen (≈ 12 s ohne neuen Kasten) aufhören.
+                // Stop after ~8 empty passes (about 12 s with no new box).
                 if (emptyPasses >= 8) break;
 
                 yield return new WaitForSeconds(1.5f);

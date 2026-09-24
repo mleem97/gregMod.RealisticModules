@@ -10,7 +10,7 @@ namespace GregModMoreModules
     /// Mass-insert catalog modules into every matching SFP port in the loaded
     /// scene. Fill mode only touches empty cages; replace mode also swaps
     /// occupied cages when the port still advertises the same sfpType
-    /// ("passender connector") and no cable is attached.
+    /// ("matching connector") and no cable is attached.
     /// Always goes through CableLink.InsertSFP so identity rewrite + hooks fire.
     /// </summary>
     internal static class MassInsert
