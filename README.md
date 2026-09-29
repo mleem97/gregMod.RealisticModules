@@ -28,6 +28,15 @@ See [docs/INDEX.md](docs/INDEX.md) for the complete documentation.
 | Windows x64 | Supported |
 | Linux x64 | Supported |
 
+### Save safety
+
+- Install **only one** of RealisticModules / MoreModules / MoreServers (overlapping ID ranges).
+- Keep the **same mod set between save and load** — saves containing custom
+  modules need this mod enabled with the same catalog to resolve them.
+- Do not turn the mod off mid-save (`Enabled=false`, experimental toggle):
+  objects saved while off cannot be restored later (one-way loss).
+- Tray/bulk boxes regain their capacity automatically after load.
+
 ## Features
 
 - Realistic 100G / 200G / 400G / 800G / 1.6T transceiver catalog (DAC, AOC, SR/FR/LR, DR)

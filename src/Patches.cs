@@ -41,7 +41,99 @@ namespace GregModMoreModules
             {
                 MelonLogger.Warning("sfpPrefabs was RESET — re-extending in Start.");
                 Core.SetupRegistry(__instance);
+                return;
             }
+            // Box array can be reset independently — re-extend without full setup.
+            var boxes = __instance.sfpsBoxedPrefab;
+            if (boxes == null || boxes.Length <= ModuleRegistry.MaxKnownId)
+            {
+                MelonLogger.Warning("sfpsBoxedPrefab was RESET — re-extending in Start.");
+                Core.ExtendBoxPrefabs(__instance);
+            }
+        }
+    }
+
+    // =========================================================================
+    // Patch: MainGameManager.OnLoad (Postfix)
+    // Save-loaded (tray/bulk) boxes may already be instantiated with vanilla
+    // slot counts — LoadSFPsFromSave only covers boxes that load modules.
+    // =========================================================================
+    [HarmonyPatch(typeof(MainGameManager), nameof(MainGameManager.OnLoad))]
+    internal static class PatchMainGameManagerOnLoad
+    {
+        private static void Postfix()
+        {
+            if (!Core.IsEnabled) return;
+            try { MelonCoroutines.Start(Core.ExpandAllSizedBoxes()); } catch { }
+        }
+    }
+
+    // =========================================================================
+    // Patch: MainGameManager.GetSfpPrefab / GetSfpBoxPrefab (Prefix)
+    // Save/load instantiates boxes and modules via these getters (not via the
+    // shop path). Without this, custom boxTypes resolve to null and placed
+    // boxes/modules vanish on relog. Build on demand so load works even if
+    // the prefab arrays were reset after Awake.
+    // =========================================================================
+    [HarmonyPatch(typeof(MainGameManager), nameof(MainGameManager.GetSfpPrefab))]
+    internal static class PatchGetSfpPrefab
+    {
+        private static bool Prefix(int prefabID, ref GameObject __result)
+        {
+            if (!Core.IsEnabled) return true;
+            if (!ModuleRegistry.TryGet(prefabID, out var entry)) return true;
+            var mgm = MainGameManager.instance;
+            if (mgm == null) return true;
+            try
+            {
+                Core.EnsureRegistry(mgm);
+                var arr = mgm.sfpPrefabs;
+                if (arr != null && prefabID >= 0 && prefabID < arr.Length && arr[prefabID] != null)
+                {
+                    __result = arr[prefabID];
+                    return false;
+                }
+                __result = Core.BuildModulePrefab(mgm, prefabID, entry,
+                    Core.TemplateHolder != null ? Core.TemplateHolder.transform : null);
+                if (__result != null) __result.name = $"SFPModule_template_{prefabID}";
+                if (__result != null) return false;
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Warning($"GetSfpPrefab custom {prefabID} failed: {ex.Message}");
+            }
+            return true;
+        }
+    }
+
+    [HarmonyPatch(typeof(MainGameManager), nameof(MainGameManager.GetSfpBoxPrefab))]
+    internal static class PatchGetSfpBoxPrefab
+    {
+        private static bool Prefix(int prefabID, ref GameObject __result)
+        {
+            if (!Core.IsEnabled) return true;
+            if (!ModuleRegistry.TryGet(prefabID, out var entry)) return true;
+            var mgm = MainGameManager.instance;
+            if (mgm == null) return true;
+            try
+            {
+                Core.EnsureRegistry(mgm);
+                var arr = mgm.sfpsBoxedPrefab;
+                if (arr != null && prefabID >= 0 && prefabID < arr.Length && arr[prefabID] != null)
+                {
+                    __result = arr[prefabID];
+                    return false;
+                }
+                __result = Core.BuildBoxPrefab(mgm, prefabID, entry,
+                    Core.TemplateHolder != null ? Core.TemplateHolder.transform : null);
+                if (__result != null) __result.name = $"SFPBox_template_{prefabID}";
+                if (__result != null) return false;
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Warning($"GetSfpBoxPrefab custom {prefabID} failed: {ex.Message}");
+            }
+            return true;
         }
     }
 
@@ -241,6 +333,10 @@ namespace GregModMoreModules
             var mgm = MainGameManager.instance;
             if (mgm == null) return;
 
+            // Load happens after Awake, but the game may have reset the arrays
+            // in between — re-establish both module and box templates first.
+            Core.EnsureRegistry(mgm);
+
             var arr = mgm.sfpPrefabs;
             if (arr == null) return;
 
@@ -257,6 +353,15 @@ namespace GregModMoreModules
                     arr[prefabID] = template;
                 }
             }
+        }
+
+        // Loaded tray/bulk boxes arrive with vanilla slot counts — re-run the
+        // post-delivery expansion scan so they regain their tray capacity.
+        // No-op when the scanner is already running.
+        private static void Postfix()
+        {
+            if (!Core.IsEnabled) return;
+            try { MelonCoroutines.Start(Core.ExpandAllSizedBoxes()); } catch { }
         }
     }
 

@@ -42,6 +42,16 @@ namespace GregModMoreModules
             LivePrefabByInstance.Clear();
         }
 
+        /// <summary>
+        /// Drops live-module identity mappings (keyed by recyclable instance
+        /// IDs) without touching registrations. Called on scene change so
+        /// stale entries cannot misidentify new objects.
+        /// </summary>
+        internal static void ClearLiveMap()
+        {
+            LivePrefabByInstance.Clear();
+        }
+
         internal static void Register(int prefabId, Entry entry)
         {
             EntriesByPrefab[prefabId] = entry;

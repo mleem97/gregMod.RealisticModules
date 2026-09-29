@@ -4,6 +4,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/). Version: see [
 
 ## [Unreleased]
 
+### Fixed
+
+- Boxes/modules vanishing on relog: `sfpsBoxedPrefab` is now extended with
+  custom box templates alongside `sfpPrefabs`, and new
+  `GetSfpPrefab`/`GetSfpBoxPrefab` prefixes serve custom IDs on demand so
+  save/load can resolve custom boxTypes (same fix as MoreModules/MoreServers).
+- Loaded tray/bulk boxes regain their capacity: the expansion scan now also
+  runs after `LoadSFPsFromSave`, not just after purchase.
+- Stale take-tags and live-module identity mappings are cleared on scene
+  change (Unity recycles instance IDs; stale entries could misidentify
+  vanilla modules as custom ones).
+
 ### Added
 
 - Mass Insert (F1/F8): fill matching empty SFP slots, optionally replace when the connector matches (v1.3.0).

@@ -352,6 +352,89 @@ namespace GregModMoreModules
             mgm.sfpPrefabs = extended;
             MelonLogger.Msg($"sfpPrefabs extended: {sfpPrefabs.Length} → {extended.Length}");
             IsSetupComplete = ModuleRegistry.Entries.Count > 0;
+
+            ExtendBoxPrefabs(mgm);
+        }
+
+        // -----------------------------------------------------------------------
+        // Save/load fix: the game resolves placed boxes via
+        // MainGameManager.GetSfpBoxPrefab(boxType) / sfpsBoxedPrefab[boxType].
+        // Only extending sfpPrefabs left custom boxTypes unresolvable, so boxes
+        // (and their contents) vanished on relog. Mirror the module slots into
+        // sfpsBoxedPrefab so load can find our box prefabs.
+        // -----------------------------------------------------------------------
+        internal static void ExtendBoxPrefabs(MainGameManager mgm)
+        {
+            try
+            {
+                var boxPrefabs = mgm.sfpsBoxedPrefab;
+                int wantLen = Math.Max(ModuleRegistry.MaxKnownId + 1, boxPrefabs?.Length ?? 0);
+                if (wantLen <= 0) return;
+                if (boxPrefabs != null && boxPrefabs.Length >= wantLen)
+                {
+                    bool missing = false;
+                    foreach (var pair in ModuleRegistry.Entries)
+                    {
+                        int id = pair.Key;
+                        if (id < 0 || id >= boxPrefabs.Length || boxPrefabs[id] == null)
+                        { missing = true; break; }
+                    }
+                    if (!missing) return;
+                }
+
+                var extendedBox = new GameObject[wantLen];
+                if (boxPrefabs != null)
+                {
+                    for (int i = 0; i < boxPrefabs.Length && i < wantLen; i++)
+                        extendedBox[i] = boxPrefabs[i];
+                }
+
+                foreach (var pair in ModuleRegistry.Entries)
+                {
+                    int id = pair.Key;
+                    var entry = pair.Value;
+                    if (id < 0 || id >= wantLen) continue;
+                    if (extendedBox[id] != null) continue;
+                    try
+                    {
+                        var boxTemplate = BuildBoxPrefab(mgm, id, entry,
+                            TemplateHolder != null ? TemplateHolder.transform : null);
+                        if (boxTemplate != null)
+                            boxTemplate.name = $"SFPBox_template_{id}";
+                        extendedBox[id] = boxTemplate;
+                    }
+                    catch (System.Exception ex)
+                    {
+                        MelonLogger.Warning($"Box template {id} failed: {ex.Message}");
+                    }
+                }
+
+                mgm.sfpsBoxedPrefab = extendedBox;
+                MelonLogger.Msg($"sfpsBoxedPrefab extended: {boxPrefabs?.Length ?? 0} → {extendedBox.Length}");
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Warning($"ExtendBoxPrefabs failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Re-establishes registry + both prefab arrays when the game reset them
+        /// (or when a load happens before Awake ran). Safe to call from load-path patches.
+        /// </summary>
+        internal static void EnsureRegistry(MainGameManager mgm)
+        {
+            if (!IsEnabled || mgm == null) return;
+            try
+            {
+                if (!IsSetupCompleteFor(mgm))
+                {
+                    SetupRegistry(mgm);
+                    return;
+                }
+                ExtendBoxPrefabs(mgm);
+            }
+            catch { }
         }
 
         internal static bool IsSetupCompleteFor(MainGameManager mgm)
@@ -587,6 +670,11 @@ namespace GregModMoreModules
             // A running box scan is cancelled on scene change;
             // reset the flag so future deliveries expand again.
             _boxScannerRunning = false;
+            // Unity recycles instance IDs: stale take-tags must not survive a
+            // scene change, or a vanilla module could be rewritten to a custom
+            // ID by mistake.
+            try { CustomModuleTags.TakenModuleIds.Clear(); } catch { }
+            try { ModuleRegistry.ClearLiveMap(); } catch { }
 
             if (!ModConfig.Enabled)
             {
